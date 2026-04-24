@@ -173,7 +173,11 @@ const StarLevelIcon = ({ level }) => {
 function CardList({ cards, isLoading, user }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('newest'); 
+  const [filterRel, setFilterRel] = useState(''); // 新增：關係篩選狀態
   const [selectedCardId, setSelectedCardId] = useState(null);
+
+  // 新增：自動抓取所有出現過的「關係」標籤，過濾掉空白與重複
+  const uniqueRelationships = [...new Set(cards.map(c => c.relationship).filter(Boolean))];
 
   const toggleImportance = async (e, card) => {
     e.stopPropagation(); 
@@ -188,10 +192,12 @@ function CardList({ cards, isLoading, user }) {
   };
 
   const filteredCards = cards.filter(card => {
+    // 1. 先做「關係」精準篩選
+    if (filterRel && card.relationship !== filterRel) return false;
+    
+    // 2. 再做模糊搜尋
     if (!searchTerm) return true;
-    
     const searchParts = searchTerm.toLowerCase().match(/[a-z0-9]+|[^a-z0-9\s]/g) || [];
-    
     const combinedText = [
       card.name_zh, card.name_en, card.company_zh, card.company_en,
       card.title_zh, card.title_en, card.phone, card.email,
@@ -212,11 +218,10 @@ function CardList({ cards, isLoading, user }) {
     return (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0); 
   });
 
-  const exportToCSV = () => {
+  const exportToCSV = () => { /* ...原本匯出的邏輯不動... */
     if (cards.length === 0) return alert("目前沒有資料");
     const headers = ["中文姓名", "英文姓名", "中文職稱", "英文職稱", "中文公司", "英文公司", "電話", "Email", "中文地址", "英文地址", "工作項目", "關係", "認識場合", "備註", "重要等級", "建立時間"];
     const levelText = { 3: 'S級', 2: 'A級', 1: 'B級', 0: 'C級(無)' };
-    
     const rows = cards.map(c => {
       const imp = c.importance !== undefined ? c.importance : (c.isImportant ? 1 : 0);
       return [
@@ -242,7 +247,7 @@ function CardList({ cards, isLoading, user }) {
         <div className="flex justify-between items-center">
           <h2 className="text-gray-700 font-bold">名片庫 ({filteredCards.length})</h2>
           <div className="flex gap-2">
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="text-sm border-gray-300 rounded-lg bg-gray-50 px-2 py-1.5 focus:ring-blue-500 border">
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="text-sm border-gray-300 rounded-lg bg-gray-50 px-2 py-1.5 focus:ring-blue-500 border outline-none">
               <option value="newest">最新加入</option>
               <option value="oldest">最舊加入</option>
               <option value="important">標記重要優先</option>
@@ -250,10 +255,24 @@ function CardList({ cards, isLoading, user }) {
             <button onClick={exportToCSV} className="flex items-center gap-1 text-sm bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-200 hover:bg-green-100 transition-colors"><Download size={16} />匯出</button>
           </div>
         </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-          <input type="text" placeholder="全局模糊搜尋 (姓名、地點、備註...)" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 bg-gray-50" />
-          {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><X size={16} /></button>}
+        
+        {/* 新增：搜尋列左側加入分類下拉選單 */}
+        <div className="flex gap-2">
+          {uniqueRelationships.length > 0 && (
+            <select 
+              value={filterRel} 
+              onChange={(e) => setFilterRel(e.target.value)} 
+              className="w-1/3 max-w-[120px] px-3 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 bg-gray-50 text-sm outline-none truncate"
+            >
+              <option value="">所有關係</option>
+              {uniqueRelationships.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input type="text" placeholder="模糊搜尋 (姓名、備註...)" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 bg-gray-50 outline-none" />
+            {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><X size={16} /></button>}
+          </div>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4 bg-gray-100">
@@ -593,7 +612,16 @@ function CaptureFlow({ user, userApiKey, cards, onComplete, onCancel }) {
     </div>
   );
 
-  return <EditForm initialData={extractedData} frontImage={frontImage} backImage={backImage} onSave={saveCard} onCancel={onCancel} cards={cards} />;
+  return <EditForm 
+    initialData={extractedData} 
+    frontImage={frontImage} 
+    backImage={backImage} 
+    onSave={saveCard} 
+    onCancel={onCancel} 
+    cards={cards} 
+    onRetryAI={processImages} 
+    onRetake={() => setStep('upload')} 
+  />;
 }
 
 // 新的圖片預覽與旋轉小元件 (取代原本的 Uploader 元件)
@@ -621,7 +649,7 @@ function ImagePreview({ label, img, setImg }) {
   );
 }
 
-function EditForm({ initialData, frontImage, backImage, onSave, onCancel, cards = [], isUpdateMode = false }) {
+function EditForm({ initialData, frontImage, backImage, onSave, onCancel, cards = [], isUpdateMode = false, onRetryAI, onRetake }) {
   const [data, setData] = useState({ ...initialData });
   const [saving, setSaving] = useState(false);
   const change = (e) => setData({ ...data, [e.target.name]: e.target.value });
@@ -637,10 +665,28 @@ function EditForm({ initialData, frontImage, backImage, onSave, onCancel, cards 
         <button onClick={save} disabled={saving} className={`font-bold flex items-center gap-1 ${saving ? 'text-gray-300' : 'text-blue-600'}`}>{saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18}/>}儲存</button>
       </div>
       <div className="p-4 space-y-6 max-w-2xl mx-auto w-full pb-20">
-        <div className="flex gap-2 overflow-x-auto pb-2 snap-x">
-          {frontImage && <img src={frontImage} className="h-40 rounded-lg border snap-start" />}
-          {backImage && <img src={backImage} className="h-40 rounded-lg border snap-start" />}
+        
+        {/* === 修改這個區塊 === */}
+        <div>
+          <div className="flex gap-2 overflow-x-auto pb-2 snap-x">
+            {frontImage && <img src={frontImage} className="h-40 rounded-lg border snap-start" />}
+            {backImage && <img src={backImage} className="h-40 rounded-lg border snap-start" />}
+          </div>
+          
+          {/* 新增：只有在「新增模式」下才顯示這兩顆快捷按鈕 */}
+          {!isUpdateMode && (
+            <div className="flex gap-2 mt-2">
+              <button onClick={onRetake} className="flex-1 py-2.5 bg-white text-gray-700 rounded-xl text-sm font-bold border border-gray-300 flex items-center justify-center gap-1.5 shadow-sm active:bg-gray-50 transition-colors">
+                <Camera size={16}/>重新拍照或換圖
+              </button>
+              <button onClick={onRetryAI} className="flex-1 py-2.5 bg-indigo-50 text-indigo-700 rounded-xl text-sm font-bold border border-indigo-200 flex items-center justify-center gap-1.5 shadow-sm active:bg-indigo-100 transition-colors">
+                <RefreshCw size={16}/>重新 AI 辨識
+              </button>
+            </div>
+          )}
         </div>
+        {/* ===================== */}
+
         {!isUpdateMode && <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex gap-2"><Check className="text-blue-500 shrink-0" size={18} /><p className="text-xs text-blue-700">可點擊欄位修改，系統提供歷史紀錄快速帶入功能。</p></div>}
         
         <div className="space-y-4">
