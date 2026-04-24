@@ -77,7 +77,7 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={handleGoogleLogin} />;
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 font-sans text-gray-800">
+    <div className="flex flex-col h-[100dvh] bg-gray-50 font-sans text-gray-800">
       <header className="bg-blue-600 text-white shadow-md p-4 flex justify-between items-center z-10 shrink-0">
         <h1 className="text-xl font-bold flex items-center gap-2"><Briefcase size={24} /> AI 名片管家</h1>
         <div className="flex items-center gap-3">
@@ -458,11 +458,16 @@ function DeleteModal({ name, onCancel, onConfirm }) {
 }
 
 // --- Capture Flow ---
+// --- Capture Flow ---
 function CaptureFlow({ user, userApiKey, cards, onComplete, onCancel }) {
   const [step, setStep] = useState('upload');
   const [frontImage, setFrontImage] = useState(null);
   const [backImage, setBackImage] = useState(null);
   const [extractedData, setExtractedData] = useState({});
+
+  const fileInputRef = useRef();
+  const frontCameraRef = useRef();
+  const backCameraRef = useRef();
 
   const processImages = async () => {
     if (!frontImage) return;
@@ -491,19 +496,90 @@ function CaptureFlow({ user, userApiKey, cards, onComplete, onCancel }) {
     } catch { alert("儲存失敗"); }
   };
 
+  // 共用讀取圖片與壓縮邏輯
+  const handleFileRead = (file) => new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const imgObj = new Image(); imgObj.src = ev.target.result;
+      imgObj.onload = () => {
+        const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+        const MAX = 1200; let w = imgObj.width, h = imgObj.height;
+        if (w > MAX) { h *= (MAX/w); w = MAX; }
+        canvas.width = w; canvas.height = h; ctx.drawImage(imgObj, 0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      };
+    }; reader.readAsDataURL(file);
+  });
+
+  // 處理多張圖片上傳 (批次匯入)
+  const handleBatchUpload = async (e) => {
+    const files = Array.from(e.target.files).slice(0, 2);
+    if (files.length === 0) return;
+    if (files[0]) setFrontImage(await handleFileRead(files[0]));
+    if (files[1]) setBackImage(await handleFileRead(files[1]));
+    e.target.value = null; // 重置 input
+  };
+
+  // 處理單張拍照
+  const handleSingleUpload = async (e, setImg) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImg(await handleFileRead(file));
+    e.target.value = null; // 重置 input
+  };
+
   if (step === 'upload') return (
-    <div className="flex flex-col h-full bg-gray-50 overflow-y-auto p-4 space-y-6 pb-20">
-      <div className="bg-white -m-4 mb-2 p-4 border-b flex items-center gap-3"><button onClick={onCancel} className="p-1"><X size={24}/></button><h2 className="text-lg font-bold">新增名片</h2></div>
-      <div className="text-center pt-2"><p className="text-gray-600 font-medium">請拍下名片正反面</p></div>
-      <Uploader label="名片正面 (必填)" img={frontImage} onChange={setFrontImage} required />
-      <Uploader label="名片反面 (選填)" img={backImage} onChange={setBackImage} />
-      
-      {userApiKey ? (
-        <button onClick={processImages} disabled={!frontImage} className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg flex justify-center items-center gap-2 ${frontImage ? 'bg-blue-600 text-white active:scale-95' : 'bg-gray-300 text-gray-500'}`}><RefreshCw size={22} />開始 AI 智能翻譯</button>
-      ) : (
+    <div className="flex flex-col h-full bg-gray-50 overflow-y-auto p-4 space-y-5 pb-20">
+      <div className="bg-white -m-4 mb-0 p-4 border-b flex items-center gap-3 shadow-sm">
+        <button onClick={onCancel} className="p-1"><X size={24}/></button>
+        <h2 className="text-lg font-bold">新增名片</h2>
+      </div>
+
+      {/* 圖片預覽區 */}
+      {(frontImage || backImage) && (
+        <div className="flex gap-3">
+          {frontImage && <ImagePreview label="名片正面" img={frontImage} setImg={setFrontImage} />}
+          {backImage && <ImagePreview label="名片反面" img={backImage} setImg={setBackImage} />}
+        </div>
+      )}
+
+      {/* 動態相機按鈕區：依據拍照進度切換 */}
+      {!frontImage ? (
         <div className="space-y-3">
-          <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-sm border border-amber-200">您尚未設定專屬 API Key，目前僅能使用手動輸入。請點擊右上角齒輪設定。</div>
-          <button onClick={skipToManual} disabled={!frontImage} className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg flex justify-center items-center gap-2 ${frontImage ? 'bg-gray-800 text-white active:scale-95' : 'bg-gray-300 text-gray-500'}`}><Edit3 size={22} />手動輸入名片資訊</button>
+          <button onClick={() => frontCameraRef.current.click()} className="w-full h-32 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl flex flex-col items-center justify-center shadow-lg active:scale-95 transition-all">
+            <Camera size={40} className="mb-2" />
+            <span className="font-bold text-lg">開啟相機拍「正面」</span>
+          </button>
+          <input type="file" accept="image/*" capture="environment" ref={frontCameraRef} className="hidden" onChange={(e) => handleSingleUpload(e, setFrontImage)} />
+        </div>
+      ) : !backImage ? (
+        <div className="space-y-3">
+          <button onClick={() => backCameraRef.current.click()} className="w-full h-24 bg-indigo-500 hover:bg-indigo-600 text-white rounded-2xl flex flex-col items-center justify-center shadow-md active:scale-95 transition-all">
+            <Camera size={32} className="mb-1" />
+            <span className="font-bold">繼續拍「反面」(可略過)</span>
+          </button>
+          <input type="file" accept="image/*" capture="environment" ref={backCameraRef} className="hidden" onChange={(e) => handleSingleUpload(e, setBackImage)} />
+        </div>
+      ) : null}
+
+      {/* 批次匯入按鈕 (若正反面都滿了則自動隱藏) */}
+      {(!frontImage || !backImage) && (
+        <div>
+          <button onClick={() => fileInputRef.current.click()} className="w-full py-4 bg-white border-2 border-dashed border-gray-300 text-gray-600 font-bold rounded-2xl flex justify-center items-center gap-2 hover:border-blue-400 active:bg-gray-50 transition-colors">
+            <ImageIcon size={22} />
+            從相簿一次匯入 (至多2張)
+          </button>
+          <input type="file" accept="image/*" multiple ref={fileInputRef} className="hidden" onChange={handleBatchUpload} />
+        </div>
+      )}
+
+      {/* 執行辨識區 */}
+      {userApiKey ? (
+        <button onClick={processImages} disabled={!frontImage} className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg flex justify-center items-center gap-2 transition-all ${frontImage ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-95 mt-4' : 'bg-gray-300 text-gray-500'}`}><RefreshCw size={22} />開始 AI 智能翻譯</button>
+      ) : (
+        <div className="space-y-3 mt-4">
+          <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-sm border border-amber-200">您尚未設定專屬 API Key，目前僅能使用手動輸入。</div>
+          <button onClick={skipToManual} disabled={!frontImage} className={`w-full py-4 rounded-2xl font-bold text-lg shadow-lg flex justify-center items-center gap-2 transition-all ${frontImage ? 'bg-gray-800 hover:bg-gray-900 text-white active:scale-95' : 'bg-gray-300 text-gray-500'}`}><Edit3 size={22} />手動輸入名片資訊</button>
         </div>
       )}
     </div>
@@ -520,49 +596,27 @@ function CaptureFlow({ user, userApiKey, cards, onComplete, onCancel }) {
   return <EditForm initialData={extractedData} frontImage={frontImage} backImage={backImage} onSave={saveCard} onCancel={onCancel} cards={cards} />;
 }
 
-function Uploader({ label, img, onChange, required }) {
-  const ref = useRef();
-  
+// 新的圖片預覽與旋轉小元件 (取代原本的 Uploader 元件)
+function ImagePreview({ label, img, setImg }) {
   const rotate = (dir) => {
     const i = new Image(); i.src = img; i.onload = () => {
       const c = document.createElement('canvas'); const x = c.getContext('2d');
       c.width = i.height; c.height = i.width;
-      x.translate(c.width/2, c.height/2); 
-      x.rotate(dir * 90 * Math.PI / 180); 
-      x.drawImage(i, -i.width/2, -i.height/2);
-      onChange(c.toDataURL('image/jpeg', 0.8));
+      x.translate(c.width/2, c.height/2); x.rotate(dir * 90 * Math.PI / 180); x.drawImage(i, -i.width/2, -i.height/2);
+      setImg(c.toDataURL('image/jpeg', 0.8));
     };
   };
-
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-bold text-gray-700 ml-1">{label} {required && '*'}</label>
-      {!img ? (
-        <div onClick={() => ref.current.click()} className="border-2 border-dashed border-gray-300 rounded-2xl h-48 bg-white flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 active:bg-gray-50">
-          <Camera size={40} className="text-blue-400 mb-2" /><p className="text-gray-500 font-medium">點擊拍照或上傳</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <div className="relative border rounded-2xl h-48 bg-gray-100 overflow-hidden shadow-sm flex"><img src={img} className="m-auto max-h-full object-contain" /></div>
-          <div className="flex gap-2">
-            <button onClick={() => rotate(-1)} className="flex-1 py-2 bg-blue-50 text-blue-700 rounded-xl font-bold flex items-center justify-center gap-1 border border-blue-100"><RotateCcw size={18} />逆時針</button>
-            <button onClick={() => rotate(1)} className="flex-1 py-2 bg-blue-50 text-blue-700 rounded-xl font-bold flex items-center justify-center gap-1 border border-blue-100"><RotateCw size={18} />順時針</button>
-            <button onClick={() => onChange(null)} className="px-4 py-2 bg-red-50 text-red-600 rounded-xl font-bold"><Trash2 size={18} /></button>
-          </div>
-        </div>
-      )}
-      <input type="file" accept="image/*" ref={ref} className="hidden" onChange={(e) => {
-        const f = e.target.files[0]; if (!f) return;
-        const reader = new FileReader(); reader.onload = (ev) => {
-          const imgObj = new Image(); imgObj.src = ev.target.result; imgObj.onload = () => {
-            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
-            const MAX = 1200; let w = imgObj.width, h = imgObj.height;
-            if (w > MAX) { h *= (MAX/w); w = MAX; }
-            canvas.width = w; canvas.height = h; ctx.drawImage(imgObj, 0,0,w,h);
-            onChange(canvas.toDataURL('image/jpeg', 0.8));
-          };
-        }; reader.readAsDataURL(f); e.target.value = null;
-      }} />
+    <div className="space-y-2 flex-1 w-1/2">
+      <label className="text-sm font-bold text-gray-700 ml-1">{label}</label>
+      <div className="relative border rounded-2xl h-32 bg-gray-100 overflow-hidden shadow-sm flex">
+        <img src={img} className="m-auto max-h-full object-contain" />
+      </div>
+      <div className="flex gap-1">
+        <button onClick={() => rotate(-1)} className="flex-1 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-bold border border-blue-100 flex justify-center items-center transition-colors"><RotateCcw size={14}/></button>
+        <button onClick={() => rotate(1)} className="flex-1 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-bold border border-blue-100 flex justify-center items-center transition-colors"><RotateCw size={14}/></button>
+        <button onClick={() => setImg(null)} className="px-2 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-bold transition-colors"><Trash2 size={14} /></button>
+      </div>
     </div>
   );
 }
